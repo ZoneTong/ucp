@@ -69,26 +69,26 @@ extern "C" {
 #endif
 
 
-extern char* initSDK(char* p0);
+extern char* multipleInit(char* p0);
 
-/* Return type for sendData */
-struct sendData_return {
+/* Return type for multipleSend */
+struct multipleSend_return {
 	int r0;
 	char* r1;
 };
 
-extern struct sendData_return sendData(char* p0, char* p1, char* p2, int p3);
+extern struct multipleSend_return multipleSend(char* p0, char* p1, char* p2, int p3);
 
-/* Return type for recvData */
-struct recvData_return {
-	int r0; /* cn */
+/* Return type for multipleRecv */
+struct multipleRecv_return {
+	int r0; /* n */
 	char* r1; /* pdata */
 	char* r2; /* cerr */
 };
 
-extern struct recvData_return recvData(char* p0, char* p1);
+extern struct multipleRecv_return multipleRecv(char* p0, char* p1);
 
-extern char* closeSDK(char* p0);
+extern char* multipleClose(char* p0);
 
 #ifdef __cplusplus
 }

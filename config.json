@@ -1,0 +1,18 @@
+{
+    "clients":{
+        "c1":{
+            "network":"udp",
+            "addrs": ["127.0.0.1:9999","127.0.0.1:19999"  ],
+            "timeouts": ["3s","2s","60s"]
+        }
+    },
+    "servers":{
+        "s1":{
+            "network":"udp",
+            "addrs":[],
+            "timeouts": ["3s", "2s", "60s"],
+            "listen": ["127.0.0.1:9999"]
+        }
+    },
+    "mtu": 1500
+}

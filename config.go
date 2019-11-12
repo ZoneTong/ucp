@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 	multiple "ucp/multiple"
 )
 
 type GlobalConfig struct {
-	Users map[string]*UserHandler `json:"users"`
+	Clients map[string]*UserHandler `json:"clients"`
+	Servers map[string]*UserHandler `json:"servers"`
+	Mtu     int                     `json:"mtu"`
 }
 
 func (c *GlobalConfig) Start() error {
 	var errs []string
-	for _, h := range c.Users {
+	for _, h := range c.Clients {
 		// fmt.Println(tag, h)
 		err := h.Start()
 		if err != nil {
@@ -30,7 +31,7 @@ func (c *GlobalConfig) Start() error {
 
 func (c *GlobalConfig) Close() error {
 	var errs []string
-	for _, h := range c.Users {
+	for _, h := range c.Clients {
 		err := h.Close()
 		if err != nil {
 			errs = append(errs, err.Error())
@@ -44,10 +45,11 @@ func (c *GlobalConfig) Close() error {
 
 type UserHandler struct {
 	// Tag     string
-	Network string   `json:"network"`
-	Addrs   []string `json:"addrs"`
-	Timeout int      `json:"timeout"`
-	worker  io.ReadWriteCloser
+	Network  string   `json:"network"`
+	Addrs    []string `json:"addrs"`
+	Timeouts []string `json:"timeouts"`
+	Listens  []string `json:"listens"`
+	worker   io.ReadWriteCloser
 }
 
 func (c *UserHandler) Key() string {
@@ -55,7 +57,7 @@ func (c *UserHandler) Key() string {
 }
 
 func (c *UserHandler) Start() error {
-	w, err := multiple.NewMultipleWorker(c.Network, c.Addrs, time.Duration(c.Timeout)*time.Second)
+	w, err := multiple.NewMultipleWorker(c.Network, c.Addrs, c.Timeouts)
 	if err != nil {
 		return err
 	}
@@ -71,10 +73,8 @@ func (c *UserHandler) Send(p []byte) (int, error) {
 	return c.worker.Write(p)
 }
 
-const MTU = 1500
-
 func (c *UserHandler) Recv() ([]byte, error) {
-	bs := make([]byte, MTU)
+	bs := make([]byte, multiple.MAXMTU)
 	n, err := c.worker.Read(bs)
 	return bs[:n], err
 }

@@ -77,7 +77,7 @@ struct multipleSend_return {
 	char* r1;
 };
 
-extern struct multipleSend_return multipleSend(char* p0, char* p1, char* p2, int p3);
+extern struct multipleSend_return multipleSend(char* p0, char* p1, int p2);
 
 /* Return type for multipleRecv */
 struct multipleRecv_return {
@@ -86,9 +86,9 @@ struct multipleRecv_return {
 	char* r2; /* cerr */
 };
 
-extern struct multipleRecv_return multipleRecv(char* p0, char* p1);
+extern struct multipleRecv_return multipleRecv(char* p0);
 
-extern char* multipleClose(char* p0);
+extern char* multipleClose();
 
 #ifdef __cplusplus
 }

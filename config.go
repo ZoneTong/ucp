@@ -45,11 +45,15 @@ func (c *GlobalConfig) Close() error {
 
 type UserHandler struct {
 	// Tag     string
-	Network  string   `json:"network"`
-	Addrs    []string `json:"addrs"`
-	Timeouts []string `json:"timeouts"`
-	Listens  []string `json:"listens"`
-	worker   io.ReadWriteCloser
+	Network       string   `json:"network"`
+	Addrs         []string `json:"addrs"`
+	DialTimeout   string   `json:"dialtimeout"`
+	ReadTimeout   string   `json:"readtimeout"`
+	WriteTimeout  string   `json:"writetimeout"`
+	BufferTimeout string   `json:"buffertimeout"`
+
+	Listens []string `json:"listens"`
+	worker  io.ReadWriteCloser
 }
 
 func (c *UserHandler) Key() string {
@@ -57,7 +61,7 @@ func (c *UserHandler) Key() string {
 }
 
 func (c *UserHandler) Start() error {
-	w, err := multiple.NewMultipleWorker(c.Network, c.Addrs, c.Timeouts)
+	w, err := multiple.NewMultipleWorker(c.Network, c.Addrs, []string{c.DialTimeout, c.WriteTimeout, c.ReadTimeout, c.BufferTimeout})
 	if err != nil {
 		return err
 	}

@@ -3,45 +3,52 @@ package multiple
 import (
 	"errors"
 	"io"
+	"log"
 	"net"
 	"strings"
 	"sync"
 	"time"
 )
 
-type Framentmap struct {
-	m     map[uint16][]byte
-	first time.Time
-}
-
 type Worker struct {
 	conns []net.Conn
 
 	Network string
 	Addrs   []string
+
+	dialTimeout, writeTimeout  time.Duration
+	readTimeout, buffertimeout time.Duration
+
 	encoder MultipleEncoder
 	decoder MultipleDecoder
-
-	dialTimeout, writeTimeout, readTimeout time.Duration
+	done    chan bool
 
 	// packet 上层调用send发送的完整数据
 	// fragment 底层对packet的分片, 按maxmtu调整
-	recvque        chan []byte
-	reading_lock   sync.Mutex
-	reading_packet map[uint32]*Framentmap
-	ready_lock     sync.Mutex
-	ready_packet   map[uint32][]byte
-	recved_id      uint32
-	done           chan bool
+	recvque      chan []byte
+	recv_lock    sync.Mutex
+	recv_packets map[uint32]*Packet
+	ready_minid  uint32
+	readyque     chan *Packet
+
+	reading_lock sync.Mutex
+	reading      bool
+}
+
+type reader struct {
+	done     chan bool
+	recvque  <-chan []byte
+	readyque chan<- *Packet
+
+	recv_lock    sync.Mutex
+	recv_packets map[uint32]*Packet
+	ready_minid  uint32
+	reading_lock sync.Mutex
+	reading      bool
 }
 
 var (
-	_    io.ReadWriteCloser = new(Worker)
-	pool                    = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, MAXMTU)
-		},
-	}
+	_ io.ReadWriteCloser = new(Worker)
 )
 
 type connReturn struct {
@@ -49,7 +56,7 @@ type connReturn struct {
 	err error
 }
 
-func (w *Worker) Write(p []byte) (n int, err error) {
+func (w *Worker) Write(p []byte) (int, error) {
 	r := make(chan connReturn)
 	datas := w.encoder.Encode(p)
 	for _, conn := range w.conns {
@@ -63,7 +70,7 @@ func (w *Worker) Write(p []byte) (n int, err error) {
 		if rr.err == nil {
 			return rr.n, rr.err
 		} else {
-			errs = append(errs, err.Error())
+			errs = append(errs, rr.err.Error())
 		}
 	}
 
@@ -73,6 +80,9 @@ func (w *Worker) Write(p []byte) (n int, err error) {
 func (w *Worker) writeConn(conn net.Conn, datas [][]byte, r chan<- connReturn) {
 	var total, n int
 	var err error
+	if w.writeTimeout > 0 {
+		conn.SetWriteDeadline(time.Now().Add(w.writeTimeout))
+	}
 	for _, data := range datas {
 		n, err = conn.Write(data)
 		total += n
@@ -83,45 +93,125 @@ func (w *Worker) writeConn(conn net.Conn, datas [][]byte, r chan<- connReturn) {
 	r <- connReturn{total, err}
 }
 
-func (w *Worker) Read(p []byte) (n int, err error) {
-	r := make(chan connReturn)
-	for _, conn := range w.conns {
-		go func(conn net.Conn) {
-			n, err := conn.Read(p)
-			r <- connReturn{n, err}
-		}(conn)
-	}
-
-	var rr connReturn
-	var errs []string
-	for range w.conns {
-		rr = <-r
-		if rr.err == nil {
-			return rr.n, rr.err
-		} else {
-			errs = append(errs, err.Error())
-		}
-	}
-	return 0, errors.New(strings.Join(errs, "|"))
+func (w *Worker) SetReading(b bool) {
+	w.reading_lock.Lock()
+	w.reading = b
+	w.reading_lock.Unlock()
 }
 
-func (w *Worker) recvLoop(conn net.Conn, que chan []byte) {
+func (w *Worker) Reading() bool {
+	w.reading_lock.Lock()
+	b := w.reading
+	w.reading_lock.Unlock()
+	return b
+}
+
+func (w *Worker) Read(p []byte) (n int, err error) {
+	var timer = time.NewTimer(0)
+	timer.Stop()
+	if w.readTimeout > 0 {
+		timer.Reset(w.readTimeout)
+	}
+
+	w.SetReading(true)
+	defer w.SetReading(false)
+	go w.refreshReadyMinid()
+
+	var packet *Packet
+	select {
+	case <-timer.C:
+		return 0, errors.New("read timeout")
+	case packet = <-w.readyque:
+	}
+
+	n = copy(p, packet.ReadyData())
+	packet.ReleaseMem()
+	// go func() {
+	// 	select {
+	// 	case w.recvedsig <- true:
+	// 	}
+	// }()
+	return
+}
+
+func (w *Worker) recvLoop(conn net.Conn) {
 	for {
 		data := pool.Get().([]byte)
 		n, err := conn.Read(data)
 		if err != nil {
+			log.Println("recvLoop err", n, err)
 			return
 		}
 
-		que <- data[:n]
+		log.Println("recvLoop before")
+		w.recvque <- data[:n]
+		log.Println("recvLoop after")
 	}
 }
 
-func (w *Worker) timerClearReadingPacket() {
+// 定时清除超时packet
+func (w *Worker) timerClearTimeouReadingPacket() {
+	timer := time.NewTimer(w.buffertimeout)
+	for {
+		select {
+		case <-w.done:
+			timer.Stop()
+			return
+		// case <-w.recvedsig:
+		case <-timer.C:
+		}
 
+		w.clearTimeoutPackets(w.buffertimeout)
+		timer.Reset(w.buffertimeout)
+	}
 }
 
-func (w *Worker) mergePacket() {
+// 带锁,故需用gorouting调用
+func (w *Worker) refreshReadyMinid() {
+	w.recv_lock.Lock()
+	defer w.recv_lock.Unlock()
+	defer log.Println("refreshReadyMinid ready_minid", w.ready_minid)
+	var min_id uint32 = MAXID
+	for id := range w.recv_packets {
+		if id < min_id {
+			min_id = id
+		}
+	}
+
+	if min_id == MAXID {
+		w.ready_minid = 0
+		return
+	}
+
+	p, ok := w.recv_packets[min_id]
+	if ok && p.Ready() {
+		w.ready_minid = min_id
+		if w.Reading() {
+			log.Println("before send readyque", w.recv_packets[min_id])
+			delete(w.recv_packets, min_id)
+			go func() {
+				w.readyque <- p
+			}()
+			return
+		}
+	}
+}
+
+func (w *Worker) clearTimeoutPackets(to time.Duration) {
+	w.recv_lock.Lock()
+	defer w.recv_lock.Unlock()
+	log.Println("clearTimeoutPackets")
+	for id, packet := range w.recv_packets {
+		if packet.Timeouted(to) {
+			log.Println("clearTimeoutPackets Timeouted", packet.Id, packet.ReadyData())
+			packet.ReleaseMem()
+			delete(w.recv_packets, id)
+		}
+	}
+	go w.refreshReadyMinid()
+}
+
+func (w *Worker) decodeRecvDataLoop() {
 	var p *PacketFragment
 	for {
 		select {
@@ -129,50 +219,44 @@ func (w *Worker) mergePacket() {
 			return
 
 		case d := <-w.recvque:
+			log.Println("decodeRecvDataLoop before", d)
 			p = w.decoder.Decode(d)
-			if p == nil {
-				continue
-			}
-
-			w.reading_lock.Lock()
-			if p.Id > w.recved_id {
-				if p.Count <= 1 { // 没有分片
-					w.ready_lock.Lock()
-					if _, ok := w.ready_packet[p.Id]; !ok {
-						w.ready_packet[p.Id] = p.Data
-					}
-					w.ready_lock.Unlock()
-				} else { // 等待聚合
-					m, ok := w.reading_packet[p.Id]
-					if !ok {
-						m = new(Framentmap)
-						m.m = make(map[uint16][]byte)
-						m.first = time.Now()
-						w.reading_packet[p.Id] = m
-					}
-
-					_, ok = m.m[p.FragSeq]
-					if !ok {
-						m.m[p.FragSeq] = p.Data
-					}
-				}
-			}
-			w.reading_lock.Unlock()
+			pool.Put(d)
 		}
+
+		if p == nil {
+			log.Println("decode fail")
+			continue
+		}
+
+		w.recvPacketFragment(p)
 	}
+
 }
 
-func (w *Worker) readConn(conn net.Conn, datas [][]byte, r chan<- connReturn) {
-	var total, n int
-	var err error
-	for _, data := range datas {
-		n, err = conn.Read(data)
-		total += n
-		if err != nil {
-			break
+func (w *Worker) recvPacketFragment(f *PacketFragment) {
+	w.recv_lock.Lock()
+	defer w.recv_lock.Unlock()
+	log.Println("recvPacketFragment", f)
+	if f.Id <= w.ready_minid {
+		pool.Put(f.Data)
+		return
+	}
+
+	p, ok := w.recv_packets[f.Id]
+	if !ok {
+		p = NewPacket(f)
+		w.recv_packets[p.Id] = p
+	} else {
+		if !p.Put(f) {
+			pool.Put(f.Data)
 		}
 	}
-	r <- connReturn{total, err}
+
+	log.Println("recvPacketFragment packet", p)
+	if p.Ready() {
+		go w.refreshReadyMinid()
+	}
 }
 
 func (w *Worker) Close() error {
@@ -205,6 +289,16 @@ func (w *Worker) establishConnection() (err error) {
 
 		w.conns = append(w.conns, conn)
 	}
+
+	w.recv_packets = make(map[uint32]*Packet)
+	w.recvque = make(chan []byte)
+	w.readyque = make(chan *Packet)
+
+	// go w.timerClearTimeouReadingPacket()
+	go w.decodeRecvDataLoop()
+	for _, conn := range w.conns {
+		go w.recvLoop(conn)
+	}
 	return nil
 }
 
@@ -215,16 +309,13 @@ func NewMultipleWorker(network string, addrs []string, timeout []string) (io.Rea
 		done:    make(chan bool),
 	}
 
-	switch len(timeout) {
-	case 3:
-		worker.writeTimeout, _ = time.ParseDuration(timeout[2])
-		fallthrough
-	case 2:
-		worker.readTimeout, _ = time.ParseDuration(timeout[1])
-		fallthrough
-	case 1:
-		worker.dialTimeout, _ = time.ParseDuration(timeout[0])
+	worker.buffertimeout, _ = time.ParseDuration(timeout[3])
+	if worker.buffertimeout == 0 {
+		worker.buffertimeout = time.Second * 3
 	}
+	worker.readTimeout, _ = time.ParseDuration(timeout[2])
+	worker.writeTimeout, _ = time.ParseDuration(timeout[1])
+	worker.dialTimeout, _ = time.ParseDuration(timeout[0])
 
 	err := worker.establishConnection()
 	if err != nil {

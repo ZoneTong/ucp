@@ -28,11 +28,11 @@ func Init(config string) (err error) {
 }
 
 func Send(tag string, p []byte) (int, error) {
-	return globalConfig.Clients[tag].Send(p)
+	return globalConfig.Endpoints[tag].Send(p)
 }
 
 func Recv(tag string) ([]byte, error) {
-	return globalConfig.Clients[tag].Recv()
+	return globalConfig.Endpoints[tag].Recv()
 }
 
 func Close() error {

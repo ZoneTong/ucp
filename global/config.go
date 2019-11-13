@@ -10,14 +10,14 @@ import (
 )
 
 type GlobalConfig struct {
-	Clients map[string]*UserHandler `json:"endpoints"`
-	Servers map[string]*UserHandler `json:"servers"`
-	Mtu     int                     `json:"mtu"`
+	Endpoints map[string]*UserConfig `json:"endpoints"`
+	// Servers map[string]*UserConfig `json:"servers"`
+	Mtu int `json:"mtu"`
 }
 
 func (c *GlobalConfig) Start() error {
 	var errs []string
-	for _, h := range c.Clients {
+	for _, h := range c.Endpoints {
 		// fmt.Println(tag, h)
 		err := h.Start()
 		if err != nil {
@@ -25,13 +25,13 @@ func (c *GlobalConfig) Start() error {
 		}
 	}
 
-	for _, h := range c.Servers {
-		// fmt.Println(tag, h)
-		err := h.Start()
-		if err != nil {
-			errs = append(errs, err.Error())
-		}
-	}
+	// for _, h := range c.Servers {
+	// 	// fmt.Println(tag, h)
+	// 	err := h.Start()
+	// 	if err != nil {
+	// 		errs = append(errs, err.Error())
+	// 	}
+	// }
 
 	if len(errs) != 0 {
 		return errors.New(strings.Join(errs, "|"))
@@ -42,7 +42,7 @@ func (c *GlobalConfig) Start() error {
 
 func (c *GlobalConfig) Close() error {
 	var errs []string
-	for _, h := range c.Clients {
+	for _, h := range c.Endpoints {
 		err := h.Close()
 		if err != nil {
 			errs = append(errs, err.Error())
@@ -54,7 +54,7 @@ func (c *GlobalConfig) Close() error {
 	return nil
 }
 
-type UserHandler struct {
+type UserConfig struct {
 	// Tag     string
 	Network       string   `json:"network"`
 	Addrs         []string `json:"addrs"`
@@ -67,18 +67,18 @@ type UserHandler struct {
 	worker io.ReadWriteCloser
 }
 
-func (c *UserHandler) Key() string {
+func (c *UserConfig) Key() string {
 	return fmt.Sprint(c.Network, c.Addrs)
 }
 
-func (c *UserHandler) Start() error {
+func (c *UserConfig) Start() error {
 	dialTimeout, _ := time.ParseDuration(c.DialTimeout)
 	conns, err := multiple.EstablishConnection(c.Network, c.Listen, c.Addrs, dialTimeout)
 	if err != nil {
 		return err
 	}
 
-	w, err := multiple.NewMultipleWorker(conns, []string{c.DialTimeout, c.WriteTimeout, c.ReadTimeout, c.BufferTimeout})
+	w, err := multiple.NewUserMgr(conns, []string{c.DialTimeout, c.WriteTimeout, c.ReadTimeout, c.BufferTimeout})
 	if err != nil {
 		return err
 	}
@@ -86,15 +86,15 @@ func (c *UserHandler) Start() error {
 	return nil
 }
 
-func (c *UserHandler) Close() error {
+func (c *UserConfig) Close() error {
 	return c.worker.Close()
 }
 
-func (c *UserHandler) Send(p []byte) (int, error) {
+func (c *UserConfig) Send(p []byte) (int, error) {
 	return c.worker.Write(p)
 }
 
-func (c *UserHandler) Recv() ([]byte, error) {
+func (c *UserConfig) Recv() ([]byte, error) {
 	bs := make([]byte, multiple.MAXMTU)
 	n, err := c.worker.Read(bs)
 	return bs[:n], err

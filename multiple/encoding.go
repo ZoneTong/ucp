@@ -16,7 +16,7 @@ var (
 	PHEAD      = len(PROTOCOL)
 	HEADER_LEN = PHEAD + 4 + 2 + 2
 	MAXMTU     = 1500
-	UCPMTU     = 12 // MAXMTU - 20 - 8 - HEADER_LEN
+	UCPMTU     = 40 // MAXMTU - 20 - 8 - HEADER_LEN
 
 	pool = sync.Pool{
 		New: func() interface{} {
@@ -150,7 +150,7 @@ func (c *MultipleEncoder) Encode(data []byte) (datas [][]byte) {
 	// return m
 
 	datas = Frag(data, UCPMTU)
-	for i, data := range datas {
+	for i, d := range datas {
 		*c++
 		if *c == 0 || uint32(*c) == MAXID { // 0 和 MAXID 只用作界限值
 			*c = 1
@@ -158,9 +158,9 @@ func (c *MultipleEncoder) Encode(data []byte) (datas [][]byte) {
 
 		var p PacketFragment
 		p.Id = uint32(*c)
-		p.Count = uint16(len(data))
+		p.Count = uint16(len(datas))
 		p.FragSeq = uint16(i)
-		p.Data = data
+		p.Data = d
 		datas[i] = p.Marshall()
 	}
 	return

@@ -4,8 +4,14 @@ function clib(){
     ./a.out
 }
 
-function gotest(){
-    go run .
+function client(){
+    cd tests/client && go build
+    ./client
+}
+
+function server(){
+    cd tests/server && go build 
+    ./server
 }
 
 $@

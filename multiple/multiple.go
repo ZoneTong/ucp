@@ -4,17 +4,18 @@ import (
 	"errors"
 	"io"
 	"log"
-	"net"
 	"strings"
 	"sync"
 	"time"
 )
 
 type Worker struct {
-	conns []net.Conn
+	conns []localConn
 
-	Network string
-	Addrs   []string
+	// Network string
+	// Addrs   []string
+
+	Listens []string
 
 	dialTimeout, writeTimeout  time.Duration
 	readTimeout, buffertimeout time.Duration
@@ -68,7 +69,7 @@ func (w *Worker) Write(p []byte) (int, error) {
 	for range w.conns {
 		rr = <-r
 		if rr.err == nil {
-			return rr.n, rr.err
+			return len(p), rr.err
 		} else {
 			errs = append(errs, rr.err.Error())
 		}
@@ -77,7 +78,7 @@ func (w *Worker) Write(p []byte) (int, error) {
 	return 0, errors.New(strings.Join(errs, "|"))
 }
 
-func (w *Worker) writeConn(conn net.Conn, datas [][]byte, r chan<- connReturn) {
+func (w *Worker) writeConn(conn localConn, datas [][]byte, r chan<- connReturn) {
 	var total, n int
 	var err error
 	if w.writeTimeout > 0 {
@@ -134,7 +135,7 @@ func (w *Worker) Read(p []byte) (n int, err error) {
 	return
 }
 
-func (w *Worker) recvLoop(conn net.Conn) {
+func (w *Worker) recvLoop(conn localConn) {
 	for {
 		data := pool.Get().([]byte)
 		n, err := conn.Read(data)
@@ -170,7 +171,8 @@ func (w *Worker) timerClearTimeouReadingPacket() {
 func (w *Worker) refreshReadyMinid() {
 	w.recv_lock.Lock()
 	defer w.recv_lock.Unlock()
-	defer log.Println("refreshReadyMinid ready_minid", w.ready_minid)
+	log.Println("refreshReadyMinid start", w.ready_minid)
+	defer log.Println("refreshReadyMinid end ready_minid", w.ready_minid)
 	var min_id uint32 = MAXID
 	for id := range w.recv_packets {
 		if id < min_id {
@@ -186,7 +188,9 @@ func (w *Worker) refreshReadyMinid() {
 	p, ok := w.recv_packets[min_id]
 	if ok && p.Ready() {
 		w.ready_minid = min_id
+		// log.Println("refreshReadyMinid Reading  before", w.ready_minid)
 		if w.Reading() {
+			// log.Println("refreshReadyMinid Reading  after", w.ready_minid)
 			log.Println("before send readyque", w.recv_packets[min_id])
 			delete(w.recv_packets, min_id)
 			go func() {
@@ -194,6 +198,7 @@ func (w *Worker) refreshReadyMinid() {
 			}()
 			return
 		}
+		// log.Println("refreshReadyMinid Reading  not", w.ready_minid)
 	}
 }
 
@@ -274,21 +279,8 @@ func (w *Worker) Close() error {
 	return nil
 }
 
-func (w *Worker) establishConnection() (err error) {
-	var conn net.Conn
-	for _, addr := range w.Addrs {
-		if w.dialTimeout > 0 {
-			conn, err = net.DialTimeout(w.Network, addr, w.dialTimeout)
-		} else {
-			conn, err = net.Dial(w.Network, addr)
-		}
-
-		if err != nil {
-			return
-		}
-
-		w.conns = append(w.conns, conn)
-	}
+func (w *Worker) establishConnection(conns []localConn) (err error) {
+	w.conns = conns
 
 	w.recv_packets = make(map[uint32]*Packet)
 	w.recvque = make(chan []byte)
@@ -302,11 +294,11 @@ func (w *Worker) establishConnection() (err error) {
 	return nil
 }
 
-func NewMultipleWorker(network string, addrs []string, timeout []string) (io.ReadWriteCloser, error) {
+func NewMultipleWorker(conns []localConn, timeout []string) (io.ReadWriteCloser, error) {
 	worker := &Worker{
-		Network: network,
-		Addrs:   addrs,
-		done:    make(chan bool),
+		// Network: network,
+		// Addrs:   addrs,
+		done: make(chan bool),
 	}
 
 	worker.buffertimeout, _ = time.ParseDuration(timeout[3])
@@ -317,7 +309,7 @@ func NewMultipleWorker(network string, addrs []string, timeout []string) (io.Rea
 	worker.writeTimeout, _ = time.ParseDuration(timeout[1])
 	worker.dialTimeout, _ = time.ParseDuration(timeout[0])
 
-	err := worker.establishConnection()
+	err := worker.establishConnection(conns)
 	if err != nil {
 		return nil, err
 	}

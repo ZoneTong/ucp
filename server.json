@@ -1,0 +1,17 @@
+{
+    "endpoints": {
+        "s1":{
+            "network":"udp",
+            "addrs": ["127.0.0.1:8888"],
+            "timeouts": ["3s", "2s", "60s"],
+            "listen": ":9999"
+        },
+        "s2": {
+            "network": "udp",
+            "addrs": [],
+            "timeouts": ["3s", "2s", "60s"],
+            "listen": ":19999"
+        }
+    },
+    "mtu": 1500
+}

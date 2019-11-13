@@ -1,0 +1,14 @@
+{
+    "endpoints": {
+        "c1":{
+            "network":"udp",
+            "listen": ":8888",
+            "addrs": [ "127.0.0.1:9999" ],
+            "dialtimeout": "3s",
+            "writetimeout": "",
+            "readtimeout": "",
+            "buffertimeout": "2s"
+        }
+    },
+    "mtu": 1500
+}

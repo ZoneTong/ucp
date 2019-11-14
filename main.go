@@ -36,14 +36,14 @@ func multipleSend(ptag, pdata *C.char, length C.int) (C.int, *C.char) {
 }
 
 //export multipleRecv
-func multipleRecv(ptag *C.char) (n C.int, pdata, cerr *C.char) {
+func multipleRecv(ptag, pdata *C.char, length C.int) (C.int, *C.char) {
 	tag := C.GoString(ptag)
-	data, err := global.Recv(tag)
+	n, err := global.Recv(tag, C.GoBytes(unsafe.Pointer(pdata), length))
 	var serr string
 	if err != nil {
 		serr = err.Error()
 	}
-	return C.int(len(data)), (*C.char)(C.CBytes(data)), C.CString(serr)
+	return C.int(n), C.CString(serr)
 }
 
 //export multipleClose

@@ -1,25 +1,28 @@
-#include "../../dist/common.h"
+#include "../../dist/mudp.h"
 
 #include <stdio.h>
 #include <string.h>
 
 int main() {
-    char *config = "config.json";
-    multipleInit(config);
+    char *config = "client.json";
+    printf("%s", mudpInit(config));
 
     char *data= "data1zht";
-    sentResponse r = multipleSend("c1",  data, strlen(data));
-    printf("%d %s\n", r.r0, r.r1);
-    releaseSentResponse(r);
+    mudpResponse r = mudpSend("c1",  data, strlen(data));
+    printf("%d %s\n", r.n, r.error);
+    mudpReleaseResponse(r);
 
     data = "127.0.0.1";
-    r = multipleSend("c1",  data, strlen(data));
-    printf("%d %s\n", r.r0,r.r1);
-    releaseSentResponse(r);
+    r = mudpSend("c1",  data, strlen(data));
+    printf("%d %s\n", r.n,r.error);
+    mudpReleaseResponse(r);
 
-    recvdResponse r1 = multipleRecv("c1" );
-    printf("recvd %d,%s,%s\n",r1.r0,r1.r1,r1.r2);
-    releaseRecvdResponse(r1);
-    multipleClose();
+    int len = 50;
+    char *rdata = (char *)malloc(len);
+    r = mudpRecv("c1", rdata, len );
+    printf("recvd %d,%s,%s\n",r.n,r.error, rdata);
+    mudpReleaseResponse(r);
+    
+    printf("%s", mudpClose());
     return 0;
 }

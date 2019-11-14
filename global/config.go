@@ -94,8 +94,6 @@ func (c *UserConfig) Send(p []byte) (int, error) {
 	return c.worker.Write(p)
 }
 
-func (c *UserConfig) Recv() ([]byte, error) {
-	bs := make([]byte, multiple.MAXMTU)
-	n, err := c.worker.Read(bs)
-	return bs[:n], err
+func (c *UserConfig) Recv(p []byte) (int, error) {
+	return c.worker.Read(p)
 }

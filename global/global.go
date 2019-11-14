@@ -31,8 +31,8 @@ func Send(tag string, p []byte) (int, error) {
 	return globalConfig.Endpoints[tag].Send(p)
 }
 
-func Recv(tag string) ([]byte, error) {
-	return globalConfig.Endpoints[tag].Recv()
+func Recv(tag string, p []byte) (int, error) {
+	return globalConfig.Endpoints[tag].Recv(p)
 }
 
 func Close() error {

@@ -1,20 +1,36 @@
-# 协议问题记录
+# 自定义udp协议
 
-## packetid有序,起始packetid编号如何定
+## 项目方案目标
+
+    将客户的一份请求, 复制成三份以udp转发,最后在末端汇聚成原始请求.以达到加速和抗丢包的目的.
+              udp                 udp
+           /----------transfer1----------\
+          /                               \
+         /    udp                 udp      \               tcp
+    client------------transfer2-------------backend------------------>source(GameServer)
+         \                                 /
+          \   udp                 udp     /
+           \----------transfer3----------/
+
+### 已完成
+
+- client倍发
+- backend汇聚
+
+### 待完成
+
+- transfer中转(暂时直连,或用v2ray/kcptun等各种代理的长链路转发)
+- client/backend上区分多条请求
+- 多client对单backend
+
+## 协议问题记录
+
+### packetid有序,起始packetid编号如何定
 
 若从零开始,则存在问题: 客户端可能重启,发送编号seq被初始化; 此时服务端已接收编号recvd_seq比客户端编号大,不接收.
 
-### 解决方案
+#### 解决方案
 
 1. 客户端建立连接时发送序号,接收服务端响应已接收编号
 2. 服务端检测客户端源端口,若端口号变,则已接收编号归零
 3. 服务端2s内未聚合完分片则丢弃.当所有分片被丢弃时,已接收编号归零.重启的客户端间隔2s即可重启编号
-   1. merge fragment, ready packet
-   2. cleartimeout fragments and packets
-
-refresh min_readyid
-    timeouted, 可能增加,清空时置位0
-    new packet frame recved
-
-首先接收上层数据,合并数据,丢弃过时数据
-然后下层需要接收, 发送查找信号,接收数据
